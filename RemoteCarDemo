@@ -1,0 +1,312 @@
+#include <IRremote.h> //使用IRremote.h函式庫。
+const int Rspeed = 100; //右轉轉速控制。
+const int Lspeed = 100; //左轉轉速控制。
+const int negR = 4; //右輪馬達負腳。
+const int posR = 5; //右輪馬達正腳。
+const int negL = 6; //左輪馬達負腳。
+const int posL = 7; //左輪馬達正腳。
+const int pwmR = 9; //右輪馬達轉速控制腳。
+const int pwmL = 10; //左輪馬達轉速控制腳。
+const int irD1 = A1; //左(left)紅外線循跡模組。
+const int irD2 = A2; //中(center)紅外線循跡模組。
+const int irD3 = A3; //右(right)紅外線循跡模組。
+byte IRstatus = 0; //紅外線循跡模組感應值。 //初值設定
+long FOR = 0xFF18E7; //前進代碼。
+long BACK = 0xFF4AB5; //後退代碼。
+long RIGHT = 0xFF10EF; //右轉代碼。
+long LEFT = 0xFF5AA5; //左轉代碼。
+
+long PAUSE = 0xFF38C7; //停止代碼。
+long Default = 0xFF629D; //回到預設模式
+long L = 0xFFA25D; //往前切換模式
+long R = 0xFFE21D; //往後切換模式
+int mode = 1;
+const int RECV_PIN = 2; //使用數位腳2讀取IR接收模組資料。
+IRrecv irrecv(RECV_PIN); //設定數位腳2讀取IR接收器資料。
+decode_results results; //results物件儲存IR接收模組資料。 //初值設定
+//party mode 初始值
+const int ledCount = 3;
+const int Sound = A0;
+const int ledPins[] = {11, 12, 13};
+int thisLed = 0;
+
+
+void setup()
+{
+  pinMode(negR, OUTPUT); //設定數位腳4控制右輪負極。
+  pinMode(posR, OUTPUT); //設定數位腳5控制右輪正極。
+  pinMode(negL, OUTPUT); //設定數位腳6控制左輪負極。
+  pinMode(posL, OUTPUT); //設定數位腳7控制左輪正極。
+  pinMode(irD1, INPUT_PULLUP); //設定類比腳A1為含提升電阻的輸入腳。
+  pinMode(irD2, INPUT_PULLUP); //設定類比腳A2為含提升電阻的輸入腳。
+  pinMode(irD3, INPUT_PULLUP); //設定類比腳A3為含提升電阻的輸入腳。
+  pinMode(pwmR, OUTPUT); //設定數位腳9為輸出埠。
+  pinMode(pwmL, OUTPUT); //設定數位腳10為輸出埠。
+  //開啟led
+  for (int thisLed = 0; thisLed <  ledCount; thisLed++) {
+    pinMode(ledPins[thisLed], OUTPUT);
+  }
+  pinMode(Sound, INPUT);
+  irrecv.enableIRIn(); //致能紅外線接收。
+  // irrecv.blink13(true); //致能指示燈L(數位腳13)動作。
+  Serial.begin(9600);
+
+}
+//主迴圈
+void loop()
+{
+  if (irrecv.decode(&results)) //接收紅外線訊號並解碼。
+  {
+    irrecv.resume(); //準備接收下一個訊號。
+    if (results.value == Default)
+      mode = 1;
+    else if (results.value == L)
+      mode = 0;
+    else if (results.value == R)
+      mode = 2;
+
+    //選擇模式
+    switch (mode) {
+      case 0:
+        IRmode();
+        break;
+      case 1:
+        DefaultMode();
+        break;
+      case 2:
+        party();
+        break;
+    }
+  }
+}
+
+void party() {
+  while (mode == 2) {
+    int val = analogRead(Sound) ;// 200 ;
+    if (val > 50) {
+      for (int thisLed = 0; thisLed <  ledCount; thisLed++) {
+        digitalWrite(ledPins[thisLed], HIGH);
+      }
+      delay(20);
+      forward(Rspeed, Lspeed);
+      delay(80);
+      for (int thisLed = 0; thisLed < ledCount; thisLed++) {
+        digitalWrite(ledPins[thisLed], LOW);
+      }
+      delay(20);
+      back(Rspeed, Lspeed);
+      delay(80);
+      pause(0, 0);
+    }
+    // Serial.print("mode: ");
+    // Serial.println(mode);
+    //Serial.println(val);
+    if (irrecv.decode(&results)) //接收紅外線訊號並解碼。
+    {
+      irrecv.resume(); //準備接收下一個訊號。
+      if (results.value == Default) {
+        mode = 1;
+        break;
+      }
+      else if (results.value == L) {
+        mode = 0;
+        break;
+      }
+    }
+  }
+}
+void IRmode() {
+  while (mode == 0) {
+    Serial.print("mode: ");
+    Serial.println(mode);
+    int val; //輸入類比信號值。
+    IRstatus = 0; //清除紅外線循跡模組感應值。
+    val = analogRead(irD1); //讀取「左L」紅外線循跡模組感應值。
+    if (val >= 150) //感應到黑色軌道?
+      IRstatus = (IRstatus + 4); //設定感應值位元2為1。
+    val = analogRead(irD2); //讀取「中C」紅外線循跡模組感應值。
+    if (val >= 150) //感應到黑色軌道?
+      IRstatus = (IRstatus + 2); //設定感應值位元1為1。
+    val = analogRead(irD3); //讀取「右R」紅外線循跡模組感應值。
+    if (val >= 150) //感應到黑色軌道?
+      IRstatus = (IRstatus + 1); //設定感應值位元0為1。
+    driveMotor(IRstatus); //依IRstatus值設定馬達轉向及轉速。
+
+    if (irrecv.decode(&results)) //接收紅外線訊號並解碼。
+    {
+      irrecv.resume(); //準備接收下一個訊號。
+      if (results.value == Default) {
+        mode = 1;
+        break;
+      }
+      else if (results.value == R) {
+        mode = 2;
+        break;
+      }
+    }
+
+  }
+
+}
+
+//馬達轉向控制函式
+void driveMotor(byte IRstatus) {
+  switch (IRstatus)
+  {
+    case 0: //LCR=000:白白白。
+      forward(Rspeed, Lspeed); //車子繼續前進。
+      break;
+    case 1: //LCR=001:白白黑。
+      IRright(1, Rspeed, Lspeed); //車子嚴重偏左，調整車子快速右轉。
+      break;
+    case 2: //LCR=010:白黑白。
+      forward(Rspeed, Lspeed); //車子繼續前進。
+      break;
+    case 3: //LCR=011:白黑黑。
+      IRright(0, Rspeed, Lspeed); //車子輕微偏左，調整車子慢速右轉。
+    case 4: //LCR=100:黑白白。
+      IRleft(1, Rspeed, Lspeed); //車子嚴重偏右，調整車子快速左轉。
+      break;
+    case 5: //LCR=101:黑白黑。
+      pause(0, 0); //不可能發生，車子停止。
+      break;
+    case 6: //LCR=110:黑黑白。
+      IRleft(0, Rspeed, Lspeed); //車子輕微偏右，調整車子慢速左轉。
+      break;
+    case 7: //LCR=111:黑黑黑。
+      pause(0, 0); //車子停止。
+      break;
+  }
+}
+
+//紅外線遙控模式
+void DefaultMode() {
+  while (mode == 1) {
+
+    Serial.print("mode: ");
+    Serial.println(mode);
+    if (irrecv.decode(&results)) //接收紅外線訊號並解碼。
+    {
+      irrecv.resume(); //準備接收下一個訊號。
+      if (results.value == FOR) //按下「前進」鍵?
+        forward(Rspeed, Lspeed); //自走車前進。
+      else if (results.value == BACK) //按下「後退」鍵?
+        back(Rspeed, Lspeed); //自走車後退。
+      else if (results.value == RIGHT) //按下「右轉」鍵?
+        right(Rspeed, Lspeed); //自走車右轉。
+      else if (results.value == LEFT) //按下「左轉」鍵?
+        left(Rspeed, Lspeed); //自走車左轉。
+      else if (results.value == PAUSE) //按下「停止」鍵?
+        pause(0, 0); //自走車停止。
+      if (results.value == L) {
+        mode = 0;
+        break;
+      }
+      else if (results.value == R) {
+        mode = 2;
+        break;
+      }
+    }
+
+  }
+
+}
+
+
+
+//前進函式
+void forward(byte RmotorSpeed, byte LmotorSpeed)
+{
+  analogWrite(pwmR, RmotorSpeed); //設定右輪轉速。
+  analogWrite(pwmL, LmotorSpeed); //設定左輪轉速。
+  digitalWrite(posR, HIGH); //右輪正轉。
+  digitalWrite(negR, LOW);
+  digitalWrite(posL, LOW); //左輪反轉。
+  digitalWrite(negL, HIGH);
+}
+//後退函式
+void back(byte RmotorSpeed, byte LmotorSpeed)
+{
+  analogWrite(pwmR, RmotorSpeed); //設定右輪轉速。
+  analogWrite(pwmL, LmotorSpeed); //設定左輪轉速。
+  digitalWrite(posR, LOW); //右輪反轉。
+  digitalWrite(negR, HIGH);
+  digitalWrite(posL, HIGH); //左輪正轉。
+  digitalWrite(negL, LOW);
+}
+//停止函式
+void pause(byte RmotorSpeed, byte LmotorSpeed)
+{
+  analogWrite(pwmR, RmotorSpeed); //設定右輪轉速。
+  analogWrite(pwmL, LmotorSpeed); //設定左輪轉速。
+  digitalWrite(posR, LOW); //右輪停止轉動。
+  digitalWrite(negR, LOW);
+  digitalWrite(posL, LOW); //左輪 停止 轉動 。
+  digitalWrite(negL, LOW);
+}
+//右 轉 函 式
+void right(byte RmotorSpeed, byte LmotorSpeed)
+{
+  analogWrite(pwmR, RmotorSpeed); //設定 右 輪 轉速 。
+  analogWrite(pwmL, LmotorSpeed);//設定 左輪 轉速 。
+  digitalWrite(posR, LOW); //右輪停止 。
+  digitalWrite(posR, LOW);
+  digitalWrite(posL, LOW); //左輪反轉 。
+  digitalWrite(negL, HIGH) ;
+}
+//左 轉 函 式
+void left(byte RmotorSpeed, byte LmotorSpeed)
+{
+  analogWrite(pwmR, RmotorSpeed); //設定 右 輪 轉速 。
+  analogWrite(pwmL, LmotorSpeed); //設定 左輪 轉速 。
+  digitalWrite (posR, HIGH) ; //右 輪 正 轉 。
+  digitalWrite(negR, LOW);
+  digitalWrite(posL, LOW); //左輪 停止 。
+  digitalWrite(negL, LOW);
+}
+
+
+//循跡右轉函式
+void IRright(byte flag, byte RmotorSpeed, byte LmotorSpeed) {
+  analogWrite(pwmR, RmotorSpeed); //設定右輪轉速。
+  analogWrite(pwmL, LmotorSpeed); //設定左輪轉速。
+  if (flag == 1) //flag=1，馬達快速轉向。
+  {
+    digitalWrite(posR, LOW); //右馬達反轉。
+    digitalWrite(negR, HIGH);
+    digitalWrite(posL, LOW); //左馬達反轉。
+    digitalWrite(negL, HIGH);
+  }
+  else //flag=0，馬達慢速轉向。
+  {
+    digitalWrite(posR, LOW); //右馬達停止。
+    digitalWrite(negR, LOW);
+    digitalWrite(posL, LOW); //左馬達反轉。
+    digitalWrite(negL, HIGH);
+  }
+}
+//循跡左轉函式
+void IRleft(byte flag, byte RmotorSpeed, byte LmotorSpeed) {
+  analogWrite(pwmR, RmotorSpeed); //調整右馬達轉速。
+  analogWrite(pwmL, LmotorSpeed); //調整左馬達轉速。
+  if (flag == 1) //flag=1，馬達快速左轉。
+  {
+    digitalWrite(posR, HIGH); //右馬達正轉。
+    digitalWrite(negR, LOW);
+    digitalWrite(posL, HIGH);
+    digitalWrite(negL, LOW);
+  } else //flag=0，馬達慢速左轉。
+  {
+    digitalWrite(posR, HIGH); //右馬達正轉。
+    digitalWrite(negR, LOW);
+    digitalWrite(posL, LOW); //左馬達停止。
+    digitalWrite(negL, LOW);
+  }
+}
+
+
+
+
+
+
+
